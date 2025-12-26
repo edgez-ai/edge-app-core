@@ -28,7 +28,16 @@ public class WasmtimeRunner {
         return runAdd(module, a, b);
     }
 
+    /**
+     * Load and run hello_wasm.wasm from assets and return the hello string.
+     */
+    public String invokeHello(Context context) throws IOException {
+        byte[] module = readAll(context.getAssets(), "hello_wasm.wasm");
+        return runHello(module);
+    }
+
     private native int runAdd(byte[] wasmBytes, int a, int b);
+    private native String runHello(byte[] wasmBytes);
 
     private static byte[] readAll(AssetManager assets, String assetName) throws IOException {
         try (InputStream input = assets.open(assetName);

@@ -17,10 +17,12 @@ import androidx.navigation.ui.NavigationUI;
 import androidx.appcompat.app.AppCompatActivity;
 
 import ai.edgez.controller.databinding.ActivityMainBinding;
+import java.io.IOException;
 
 public class MainActivity extends AppCompatActivity {
 
     private AppBarConfiguration mAppBarConfiguration;
+    private final WasmtimeRunner wasmtimeRunner = new WasmtimeRunner();
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -31,8 +33,22 @@ public class MainActivity extends AppCompatActivity {
 
         setSupportActionBar(binding.appBarMain.toolbar);
         if (binding.appBarMain.fab != null) {
-            binding.appBarMain.fab.setOnClickListener(view -> Snackbar.make(view, "Replace with your own action", Snackbar.LENGTH_LONG)
-                    .setAction("Action", null).setAnchorView(R.id.fab).show());
+            binding.appBarMain.fab.setOnClickListener(view -> {
+                try {
+                    String hello = wasmtimeRunner.invokeHello(this);
+                    Snackbar.make(view, "Wasm says: " + hello, Snackbar.LENGTH_LONG)
+                            .setAnchorView(R.id.fab)
+                            .show();
+                } catch (IOException e) {
+                    Snackbar.make(view, "Asset error: " + e.getMessage(), Snackbar.LENGTH_LONG)
+                            .setAnchorView(R.id.fab)
+                            .show();
+                } catch (Exception e) {
+                    Snackbar.make(view, "Wasm error: " + e.getMessage(), Snackbar.LENGTH_LONG)
+                            .setAnchorView(R.id.fab)
+                            .show();
+                }
+            });
         }
         NavHostFragment navHostFragment = (NavHostFragment) getSupportFragmentManager().findFragmentById(R.id.nav_host_fragment_content_main);
         assert navHostFragment != null;
