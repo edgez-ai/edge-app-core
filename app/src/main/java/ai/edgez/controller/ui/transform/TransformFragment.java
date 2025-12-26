@@ -68,7 +68,7 @@ public class TransformFragment extends Fragment {
     private NsdManager nsdManager;
     private NsdManager.DiscoveryListener discoveryListener;
     private final Handler handler = new Handler(Looper.getMainLooper());
-    private final ExecutorService ioExecutor = Executors.newSingleThreadExecutor();
+    private ExecutorService ioExecutor = Executors.newSingleThreadExecutor();
     private final ActivityResultLauncher<String> permissionLauncher =
             registerForActivityResult(new ActivityResultContracts.RequestPermission(), granted -> {
                 if (granted) {
@@ -115,7 +115,9 @@ public class TransformFragment extends Fragment {
         super.onDestroyView();
         handler.removeCallbacksAndMessages(null);
         stopDiscovery();
-        ioExecutor.shutdownNow();
+        if (ioExecutor != null) {
+            ioExecutor.shutdown();
+        }
         binding = null;
     }
 
@@ -262,6 +264,9 @@ public class TransformFragment extends Fragment {
     }
 
     private void fetchDevices(Lwm2mService service) {
+        if (ioExecutor == null || ioExecutor.isShutdown()) {
+            ioExecutor = Executors.newSingleThreadExecutor();
+        }
         ioExecutor.execute(() -> {
             HttpURLConnection connection = null;
             try {
