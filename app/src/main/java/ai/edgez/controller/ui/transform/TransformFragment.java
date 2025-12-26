@@ -27,10 +27,24 @@ import androidx.recyclerview.widget.RecyclerView;
 import ai.edgez.controller.databinding.FragmentTransformBinding;
 import ai.edgez.controller.databinding.ItemTransformBinding;
 
+import org.json.JSONArray;
+import org.json.JSONException;
+import org.json.JSONObject;
+
+import java.io.BufferedReader;
+import java.io.IOException;
+import java.io.InputStream;
+import java.io.InputStreamReader;
+import java.net.HttpURLConnection;
 import java.net.InetAddress;
+import java.net.URL;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 
 /**
  * Fragment that demonstrates a responsive layout pattern where the format of the content
@@ -44,13 +58,17 @@ public class TransformFragment extends Fragment {
     private static final String SERVICE_TYPE = "_lwm2m._udp.";
     private static final String NAME_FILTER = "wakaama-lwm2m";
     private static final long REDISCOVER_INTERVAL_MS = 30_000L;
+    private static final int REST_PORT = 8088;
+    private static final String CLIENTS_PATH = "/api/clients";
 
     private FragmentTransformBinding binding;
     private DevicesAdapter adapter;
     private final List<Lwm2mService> services = new ArrayList<>();
+    private final Map<String, List<Device>> devicesByService = new HashMap<>();
     private NsdManager nsdManager;
     private NsdManager.DiscoveryListener discoveryListener;
     private final Handler handler = new Handler(Looper.getMainLooper());
+    private final ExecutorService ioExecutor = Executors.newSingleThreadExecutor();
     private final ActivityResultLauncher<String> permissionLauncher =
             registerForActivityResult(new ActivityResultContracts.RequestPermission(), granted -> {
                 if (granted) {
@@ -97,6 +115,7 @@ public class TransformFragment extends Fragment {
         super.onDestroyView();
         handler.removeCallbacksAndMessages(null);
         stopDiscovery();
+        ioExecutor.shutdownNow();
         binding = null;
     }
 
@@ -202,7 +221,7 @@ public class TransformFragment extends Fragment {
         } else {
             services.add(service);
         }
-        adapter.submitList(new ArrayList<>(services));
+        rebuildDeviceList();
     }
 
     private void removeServiceByName(String name) {
@@ -218,7 +237,8 @@ public class TransformFragment extends Fragment {
         }
         services.clear();
         services.addAll(updated);
-        adapter.submitList(new ArrayList<>(services));
+        devicesByService.remove(name);
+        rebuildDeviceList();
     }
 
     private class ResolveListener implements NsdManager.ResolveListener {
@@ -235,7 +255,103 @@ public class TransformFragment extends Fragment {
             }
             String address = host.getHostAddress();
             int port = serviceInfo.getPort();
-            addOrUpdateService(new Lwm2mService(serviceInfo.getServiceName(), address, port));
+            Lwm2mService service = new Lwm2mService(serviceInfo.getServiceName(), address, port);
+            addOrUpdateService(service);
+            fetchDevices(service);
+        }
+    }
+
+    private void fetchDevices(Lwm2mService service) {
+        ioExecutor.execute(() -> {
+            HttpURLConnection connection = null;
+            try {
+                String host = formatHost(service.address);
+                URL url = new URL("http://" + host + ":" + REST_PORT + CLIENTS_PATH);
+                Log.d(TAG, "Fetching devices from " + url);
+                connection = (HttpURLConnection) url.openConnection();
+                connection.setRequestMethod("GET");
+                connection.setConnectTimeout(5_000);
+                connection.setReadTimeout(5_000);
+
+                int code = connection.getResponseCode();
+                if (code != HttpURLConnection.HTTP_OK) {
+                    Log.w(TAG, "REST fetch failed for " + service.address + " code=" + code);
+                    return;
+                }
+                String body = readAll(connection.getInputStream());
+                Log.d(TAG, "HTTP 200 from " + service.address + " bodyLen=" + body.length());
+                if (body.length() < 256) {
+                    Log.d(TAG, "Body=" + body);
+                }
+                List<Device> devices = parseDevices(body, service);
+                Log.d(TAG, "Parsed " + devices.size() + " devices from " + service.address);
+                handler.post(() -> updateDevicesForService(service.name, devices));
+            } catch (IOException e) {
+                Log.w(TAG, "REST fetch error for " + service.address, e);
+            } finally {
+                if (connection != null) {
+                    connection.disconnect();
+                }
+            }
+        });
+    }
+
+    private void updateDevicesForService(String serviceName, List<Device> devices) {
+        if (Looper.myLooper() != Looper.getMainLooper()) {
+            handler.post(() -> updateDevicesForService(serviceName, devices));
+            return;
+        }
+        devicesByService.put(serviceName, devices);
+        rebuildDeviceList();
+    }
+
+    private void rebuildDeviceList() {
+        List<Device> merged = new ArrayList<>();
+        for (List<Device> list : devicesByService.values()) {
+            merged.addAll(list);
+        }
+        adapter.submitList(merged);
+    }
+
+    private List<Device> parseDevices(String body, Lwm2mService service) {
+        List<Device> devices = new ArrayList<>();
+        try {
+            JSONArray array = new JSONArray(body);
+            for (int i = 0; i < array.length(); i++) {
+                JSONObject obj = array.optJSONObject(i);
+                if (obj == null) {
+                    continue;
+                }
+                String endpoint = obj.optString("endpoint", "");
+                if (endpoint.isEmpty()) {
+                    continue;
+                }
+                devices.add(new Device(endpoint, service.address, REST_PORT));
+            }
+        } catch (JSONException e) {
+            Log.w(TAG, "Failed to parse devices JSON", e);
+        }
+        return devices;
+    }
+
+    private String formatHost(String addr) {
+        if (addr == null) {
+            return "";
+        }
+        if (addr.contains(":") && !(addr.startsWith("[") && addr.endsWith("]"))) {
+            return "[" + addr + "]";
+        }
+        return addr;
+    }
+
+    private String readAll(InputStream in) throws IOException {
+        try (BufferedReader reader = new BufferedReader(new InputStreamReader(in))) {
+            StringBuilder sb = new StringBuilder();
+            String line;
+            while ((line = reader.readLine()) != null) {
+                sb.append(line);
+            }
+            return sb.toString();
         }
     }
 
@@ -255,17 +371,29 @@ public class TransformFragment extends Fragment {
         }
     }
 
-    private static class DevicesAdapter extends ListAdapter<Lwm2mService, DeviceViewHolder> {
+    private static class Device {
+        final String endpoint;
+        final String address;
+        final int port;
+
+        Device(String endpoint, String address, int port) {
+            this.endpoint = endpoint;
+            this.address = address;
+            this.port = port;
+        }
+    }
+
+    private static class DevicesAdapter extends ListAdapter<Device, DeviceViewHolder> {
 
         protected DevicesAdapter() {
-            super(new DiffUtil.ItemCallback<Lwm2mService>() {
+            super(new DiffUtil.ItemCallback<Device>() {
                 @Override
-                public boolean areItemsTheSame(@NonNull Lwm2mService oldItem, @NonNull Lwm2mService newItem) {
-                    return oldItem.name.equals(newItem.name) && oldItem.address.equals(newItem.address) && oldItem.port == newItem.port;
+                public boolean areItemsTheSame(@NonNull Device oldItem, @NonNull Device newItem) {
+                    return oldItem.endpoint.equals(newItem.endpoint) && oldItem.address.equals(newItem.address) && oldItem.port == newItem.port;
                 }
 
                 @Override
-                public boolean areContentsTheSame(@NonNull Lwm2mService oldItem, @NonNull Lwm2mService newItem) {
+                public boolean areContentsTheSame(@NonNull Device oldItem, @NonNull Device newItem) {
                     return areItemsTheSame(oldItem, newItem);
                 }
             });
@@ -282,9 +410,9 @@ public class TransformFragment extends Fragment {
 
         @Override
         public void onBindViewHolder(@NonNull DeviceViewHolder holder, int position) {
-            Lwm2mService service = getItem(position);
-            holder.name.setText(service.name);
-            holder.address.setText(service.address + ":" + service.port);
+            Device device = getItem(position);
+            holder.name.setText(device.endpoint);
+            holder.address.setText(device.address + ":" + device.port);
         }
     }
 
