@@ -16,6 +16,10 @@ android {
         versionName = "1.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+
+        ndk {
+            abiFilters += listOf("arm64-v8a")
+        }
     }
 
     buildTypes {
@@ -33,6 +37,19 @@ android {
     }
     buildFeatures {
         viewBinding = true
+    }
+
+    externalNativeBuild {
+        cmake {
+            path = file("src/main/cpp/CMakeLists.txt")
+        }
+    }
+
+    packaging {
+        jniLibs {
+            // Keep symbols for better crash decoding of the Wasmtime native library.
+            keepDebugSymbols += listOf("**/libwasmtime.so", "**/libwasmtime.a")
+        }
     }
 }
 
