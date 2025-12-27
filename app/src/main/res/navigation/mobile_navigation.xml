@@ -9,7 +9,27 @@
         android:id="@+id/nav_transform"
         android:name="ai.edgez.controller.ui.transform.TransformFragment"
         android:label="@string/menu_transform"
-        tools:layout="@layout/fragment_transform" />
+        tools:layout="@layout/fragment_transform" >
+        <action
+            android:id="@+id/action_transform_to_deviceDetail"
+            app:destination="@id/nav_device_detail" />
+    </fragment>
+
+    <fragment
+        android:id="@+id/nav_device_detail"
+        android:name="ai.edgez.controller.ui.transform.DeviceDetailFragment"
+        android:label="Device"
+        tools:layout="@layout/fragment_device_detail" >
+        <action
+            android:id="@+id/action_deviceDetail_to_resourceList"
+            app:destination="@id/nav_resource_list" />
+    </fragment>
+
+    <fragment
+        android:id="@+id/nav_resource_list"
+        android:name="ai.edgez.controller.ui.transform.ResourceListFragment"
+        android:label="Resources"
+        tools:layout="@layout/fragment_resource_list" />
 
     <fragment
         android:id="@+id/nav_reflow"

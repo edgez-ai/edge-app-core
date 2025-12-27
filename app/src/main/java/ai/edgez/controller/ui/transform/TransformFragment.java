@@ -23,7 +23,9 @@ import androidx.fragment.app.Fragment;
 import androidx.recyclerview.widget.DiffUtil;
 import androidx.recyclerview.widget.ListAdapter;
 import androidx.recyclerview.widget.RecyclerView;
+import androidx.navigation.Navigation;
 
+import ai.edgez.controller.R;
 import ai.edgez.controller.databinding.FragmentTransformBinding;
 import ai.edgez.controller.databinding.ItemTransformBinding;
 
@@ -92,6 +94,13 @@ public class TransformFragment extends Fragment {
 
         RecyclerView recyclerView = binding.recyclerviewTransform;
         adapter = new DevicesAdapter();
+        adapter.setOnDeviceClick(device -> {
+            Bundle args = new Bundle();
+            args.putString("endpoint", device.endpoint);
+            args.putString("host", device.address);
+            Navigation.findNavController(requireActivity(), R.id.nav_host_fragment_content_main)
+                    .navigate(R.id.action_transform_to_deviceDetail, args);
+        });
         recyclerView.setAdapter(adapter);
         return root;
     }
@@ -390,6 +399,16 @@ public class TransformFragment extends Fragment {
 
     private static class DevicesAdapter extends ListAdapter<Device, DeviceViewHolder> {
 
+        interface OnDeviceClick {
+            void onClick(Device device);
+        }
+
+        private OnDeviceClick click;
+
+        void setOnDeviceClick(OnDeviceClick click) {
+            this.click = click;
+        }
+
         protected DevicesAdapter() {
             super(new DiffUtil.ItemCallback<Device>() {
                 @Override
@@ -418,6 +437,9 @@ public class TransformFragment extends Fragment {
             Device device = getItem(position);
             holder.name.setText(device.endpoint);
             holder.address.setText(device.address + ":" + device.port);
+            holder.itemView.setOnClickListener(v -> {
+                if (click != null) click.onClick(device);
+            });
         }
     }
 
